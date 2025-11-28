@@ -155,7 +155,7 @@ This script creates various sizes of calendar icons for the app icon set.
 - Try resetting settings by deleting the app's preferences:
 
   ```bash
-  defaults delete com.yourbundleidentifier.MenuBarCalendar
+  defaults delete com.richardrigby.MenuBarCalendar
   ```
 
 ### Build Issues
