@@ -1,42 +1,6 @@
 import SwiftUI
 import AppKit
 
-// Visual effect view for translucent background
-struct VisualEffectView: NSViewRepresentable {
-    let material: NSVisualEffectView.Material
-    let blendingMode: NSVisualEffectView.BlendingMode
-    
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = material
-        view.blendingMode = blendingMode
-        view.state = .active
-        view.wantsLayer = true
-        return view
-    }
-    
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-        nsView.material = material
-        nsView.blendingMode = blendingMode
-    }
-}
-
-// Background modifier that makes the popover window transparent
-struct VisualEffectBackground: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async {
-            if let window = view.window {
-                window.isOpaque = false
-                window.backgroundColor = .clear
-            }
-        }
-        return view
-    }
-    
-    func updateNSView(_ nsView: NSView, context: Context) {}
-}
-
 struct CalendarPopoverView: View {
     @StateObject private var settings = SettingsManager.shared
     @State private var currentDate = Date()
@@ -47,11 +11,7 @@ struct CalendarPopoverView: View {
     private let daysOfWeekSunday = ["S", "M", "T", "W", "T", "F", "S"]
     
     var body: some View {
-        ZStack {
-            VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
-                .ignoresSafeArea()
-            
-            VStack(spacing: 12) {
+        VStack(spacing: 12) {            
             // Header with navigation and settings
             HStack {
                 Button(action: previousMonth) {
@@ -96,6 +56,8 @@ struct CalendarPopoverView: View {
             }
             .padding(.horizontal, 8)
             
+            Spacer()
+
             // Days of week header
             HStack(spacing: 0) {
                 if settings.showWeekNumbers {
@@ -137,7 +99,6 @@ struct CalendarPopoverView: View {
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 8)
-        }
         .frame(width: 300, height: 340)
     }
     

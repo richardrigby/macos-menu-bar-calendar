@@ -3,9 +3,10 @@ import AppKit
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
-    private var popover: NSPopover!
+    private var calendarPanel: NSPanel?
     private var settingsWindow: NSWindow?
     private var dateUpdateTimer: Timer?
+    private var eventMonitor: Any?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Create the status item in the menu bar
@@ -17,17 +18,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.target = self
         }
         
-        // Create the popover
-        popover = NSPopover()
-        popover.contentSize = NSSize(width: 300, height: 340)
-        popover.behavior = .transient
-        popover.animates = true
-        
-        // Create hosting controller with transparent background
-        let contentView = CalendarPopoverView(openSettings: openSettings)
-            .background(VisualEffectBackground())
-        let hostingController = NSHostingController(rootView: contentView)
-        popover.contentViewController = hostingController
+        // Create the calendar panel (no arrow, flat top like native macOS panels)
+        createCalendarPanel()
         
         // Set up timer to update the date at midnight
         scheduleNextDayUpdate()
@@ -109,19 +101,95 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
+    private func createCalendarPanel() {
+        let contentView = CalendarPopoverView(openSettings: openSettings)
+        let hostingController = NSHostingController(rootView: contentView)
+        
+        // Create a visual effect view as the base
+        let visualEffectView = NSVisualEffectView()
+        visualEffectView.material = .hudWindow
+        visualEffectView.blendingMode = .behindWindow
+        visualEffectView.state = .active
+        visualEffectView.wantsLayer = true
+        visualEffectView.layer?.cornerRadius = 0
+        visualEffectView.layer?.masksToBounds = true
+        
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 340),
+            styleMask: [.nonactivatingPanel, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        
+        // Set the visual effect view as the content view
+        panel.contentView = visualEffectView
+        
+        // Add the SwiftUI hosting view on top
+        let hostingView = hostingController.view
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
+        visualEffectView.addSubview(hostingView)
+        
+        NSLayoutConstraint.activate([
+            hostingView.topAnchor.constraint(equalTo: visualEffectView.topAnchor),
+            hostingView.bottomAnchor.constraint(equalTo: visualEffectView.bottomAnchor),
+            hostingView.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor),
+            hostingView.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor)
+        ])
+        
+        panel.isFloatingPanel = true
+        panel.level = .popUpMenu
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        
+        calendarPanel = panel
+    }
+    
     @objc func togglePopover() {
-        if let button = statusItem.button {
-            if popover.isShown {
-                popover.performClose(nil)
-            } else {
-                popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-                popover.contentViewController?.view.window?.makeKey()
-            }
+        guard let panel = calendarPanel else { return }
+        
+        if panel.isVisible {
+            hidePanel()
+        } else {
+            showPanel()
+        }
+    }
+    
+    private func showPanel() {
+        guard let panel = calendarPanel, let button = statusItem.button else { return }
+        
+        // Get the button's position on screen
+        guard let buttonWindow = button.window else { return }
+        let buttonRect = button.convert(button.bounds, to: nil)
+        let screenRect = buttonWindow.convertToScreen(buttonRect)
+        
+        // Position the panel below the menu bar button, centered
+        let panelWidth: CGFloat = 300
+        let panelHeight: CGFloat = 340
+        let panelX = screenRect.midX - (panelWidth / 2)
+        let panelY = screenRect.minY - panelHeight - 7 // 7pt gap below menu bar
+        
+        panel.setFrameOrigin(NSPoint(x: panelX, y: panelY))
+        panel.makeKeyAndOrderFront(nil)
+        
+        // Add event monitor to close panel when clicking outside
+        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            self?.hidePanel()
+        }
+    }
+    
+    private func hidePanel() {
+        calendarPanel?.orderOut(nil)
+        
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
+            eventMonitor = nil
         }
     }
     
     func openSettings() {
-        popover.performClose(nil)
+        hidePanel()
         
         if settingsWindow == nil {
             let settingsView = SettingsView()
