@@ -1,0 +1,171 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build macOS App
+    runs-on: macos-14
+    
+    env:
+      # Set to 'true' to enable code signing and notarization
+      # Requires APPLE_CERTIFICATE_BASE64, APPLE_CERTIFICATE_PASSWORD, APPLE_TEAM_ID,
+      # APPLE_ID, and APPLE_ID_PASSWORD secrets to be configured
+      ENABLE_SIGNING: ${{ secrets.APPLE_CERTIFICATE_BASE64 != '' }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      # Code signing setup (only if secrets are configured)
+      - name: Install Apple certificate
+        if: env.ENABLE_SIGNING == 'true'
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          # Create temporary keychain
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          
+          # Decode certificate
+          echo $APPLE_CERTIFICATE_BASE64 | base64 --decode > $RUNNER_TEMP/certificate.p12
+          
+          # Create and configure keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          
+          # Import certificate
+          security import $RUNNER_TEMP/certificate.p12 -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+          
+          # Clean up certificate file
+          rm $RUNNER_TEMP/certificate.p12
+
+      - name: Build app (signed)
+        if: env.ENABLE_SIGNING == 'true'
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcodebuild -project MenuBarCalendar.xcodeproj \
+            -scheme MenuBarCalendar \
+            -configuration Release \
+            -archivePath build/MenuBarCalendar.xcarchive \
+            archive \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Developer ID Application" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
+
+      - name: Build app (unsigned)
+        if: env.ENABLE_SIGNING != 'true'
+        run: |
+          xcodebuild -project MenuBarCalendar.xcodeproj \
+            -scheme MenuBarCalendar \
+            -configuration Release \
+            -archivePath build/MenuBarCalendar.xcarchive \
+            archive \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Export app from archive
+        run: |
+          mkdir -p build/Export
+          cp -R build/MenuBarCalendar.xcarchive/Products/Applications/MenuBarCalendar.app build/Export/
+
+      - name: Notarize app
+        if: env.ENABLE_SIGNING == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Create ZIP for notarization
+          cd build/Export
+          zip -r MenuBarCalendar-notarize.zip MenuBarCalendar.app
+          
+          # Submit for notarization
+          xcrun notarytool submit MenuBarCalendar-notarize.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          
+          # Staple the notarization ticket
+          xcrun stapler staple MenuBarCalendar.app
+          
+          # Clean up
+          rm MenuBarCalendar-notarize.zip
+
+      - name: Create ZIP archive
+        run: |
+          cd build/Export
+          zip -r MenuBarCalendar.zip MenuBarCalendar.app
+          mv MenuBarCalendar.zip ../
+
+      - name: Clean up keychain
+        if: env.ENABLE_SIGNING == 'true' && always()
+        run: |
+          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create Release (signed)
+        if: env.ENABLE_SIGNING == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Menu Bar Calendar ${{ steps.get_version.outputs.VERSION }}
+          body: |
+            ## Menu Bar Calendar ${{ steps.get_version.outputs.VERSION }}
+            
+            ### Installation
+            1. Download `MenuBarCalendar.zip` below
+            2. Unzip the downloaded file
+            3. Move `MenuBarCalendar.app` to your Applications folder
+            4. Launch the app from Applications or Spotlight
+            
+            ### Requirements
+            - macOS 13.0 or later
+          files: build/MenuBarCalendar.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release (unsigned)
+        if: env.ENABLE_SIGNING != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Menu Bar Calendar ${{ steps.get_version.outputs.VERSION }}
+          body: |
+            ## Menu Bar Calendar ${{ steps.get_version.outputs.VERSION }}
+            
+            ### Installation
+            1. Download `MenuBarCalendar.zip` below
+            2. Unzip the downloaded file
+            3. Move `MenuBarCalendar.app` to your Applications folder
+            4. Launch the app from Applications or Spotlight
+            
+            > **Note**: On first launch, you may need to right-click the app and select "Open" to bypass Gatekeeper, as the app is not notarized.
+            
+            ### Requirements
+            - macOS 13.0 or later
+          files: build/MenuBarCalendar.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -117,6 +117,25 @@ swift generate_icon.swift
 
 This script creates various sizes of calendar icons for the app icon set.
 
+### Creating a Release
+
+Releases are automatically built and published via GitHub Actions when you push a version tag:
+
+```bash
+# Create and push a version tag
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The workflow will:
+
+1. Build the app for macOS
+2. Create a ZIP archive of the app
+3. Create a GitHub Release with the tag name
+4. Attach the ZIP file to the release
+
+You can view the release workflow status in the [Actions](https://github.com/richardrigby/macos-menu-bar-calendar/actions) tab.
+
 ### Code Style
 
 - Follows Swift standard naming conventions
